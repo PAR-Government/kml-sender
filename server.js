@@ -6,12 +6,14 @@ import WebSocket from 'ws';
 import { parseString } from 'xml2js';
 import builder from 'xmlbuilder';
 import { setTimeout } from "timers/promises";
+import { randomUUID } from 'crypto';
 
 dotenv.config()
 let accessKey = process.env.ACCESSKEY;
 let secret = process.env.SECRETKEY;
 let accessScope = process.env.SCOPE;
 let streamingURL = process.env.STREAMING;
+let authURL = process.env.AUTH;
 const KML_DIRECTORY = 'kml-files';
 const SEND_TIMEOUT = 2000;
 
@@ -41,9 +43,14 @@ async function parseAndSendKmlData(socket) {
         continue;
       }
 
+      // Persist the UID to provide the appearance of a moving object
+      let uid = randomUUID.toString();
+      let callsign = path.parse(file).name;
+      console.log(callsign);
       for (const placemark of result.kml.Document[0].Placemark) {
         const cotData = {
-          name: placemark?.name?.[0]?.trim(),
+          uid,
+          name: callsign,
           lon: placemark?.Point?.[0]?.coordinates?.[0]?.trim()?.split(",")?.[0],
           lat: placemark?.Point?.[0]?.coordinates?.[0]?.trim()?.split(",")?.[1],
         };
@@ -69,7 +76,7 @@ function createCotWithBuilder(cotData, callback) {
 
   callback(builder.create({
     event: {
-      '@uid': `KML SENDER - ${Date.now()}`,
+      '@uid': cotData.uid,
       '@version': '2.0',
       '@type': 'a-f-G-U-C-I',
       '@how': 'h-e',
@@ -79,13 +86,13 @@ function createCotWithBuilder(cotData, callback) {
       point: {
         '@lat': cotData.lat,
         '@lon': cotData.lon,
-        '@hae': Math.random() * 10000,
+        '@hae': '9999999.0',
         '@le': '9999999.0',
         '@ce': '9999999.0'
       },
       detail: {
         contact: {
-          '@callsign': `KML SENDER - ${Date.now()}`,
+          '@callsign': cotData.name,
           '@endpoint': "1",
         },
         __group: {
@@ -95,14 +102,6 @@ function createCotWithBuilder(cotData, callback) {
         track: {
           '@course': '0',
           '@speed': '0'
-        },
-        _takconnect_: {
-          '@uid': `KML SENDER - ${Date.now()}`,
-          '@processCount': '1',
-          '@ackRequired': '0',
-          '@Subdomain': `KML SENDER - ${Date.now()}`,
-          '@TakGroup': `KML SENDER - ${Date.now()}`
-
         }
       },
 
@@ -113,7 +112,7 @@ function createCotWithBuilder(cotData, callback) {
 
 async function connectToSitX(callback) {
   let accessToken = null;
-  let url = `https://pardemo.parteamconnect.com/api/v1/client_auth/token`;
+  let url = authURL;
   let scope = accessScope;
   let form = {
     grant_type: "client_credentials",
@@ -148,12 +147,6 @@ async function go() {
       let url = streamingURL;
       let authHeader = `Bearer ${token}`;
       socket = new WebSocket(url, [], { 'headers': { 'Authorization': authHeader } });
-      socket.on('connection', (client) => {
-        client.send('hello');
-      })
-      socket.on('connect', (client) => {
-        client.send('hello');
-      })
       socket.on('open', () => {
         parseAndSendKmlData(socket);
       })

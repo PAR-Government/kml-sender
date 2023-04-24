@@ -1,0 +1,27 @@
+{
+  "name": "kml-sender",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "The KML Sender application provides an example of how the Sit(x) bridge adapter feature can be used. In this application, KML files are read from a directory. The contents of each KML file are crafted into Cursor-on-Target (CoT) XML messages and are sent to the Sit(x) bridge adapter.",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PAR-Government/kml-sender.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/PAR-Government/kml-sender/issues"
+  },
+  "homepage": "https://github.com/PAR-Government/kml-sender#readme",
+  "dependencies": {
+    "dotenv": "^16.0.3",
+    "request": "^2.88.2",
+    "ws": "^8.13.0",
+    "xml2js": "^0.5.0"
+  }
+}
