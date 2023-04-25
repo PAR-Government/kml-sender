@@ -4,9 +4,9 @@ import path from 'path';
 import request from 'request';
 import WebSocket from 'ws';
 import { parseString } from 'xml2js';
-import builder from 'xmlbuilder';
-import { setTimeout } from "timers/promises";
-import { randomUUID } from 'crypto';
+import * as uuid from 'uuid';
+import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
+
 
 dotenv.config()
 let accessKey = process.env.ACCESSKEY;
@@ -15,99 +15,74 @@ let accessScope = process.env.SCOPE;
 let streamingURL = process.env.STREAMING;
 let authURL = process.env.AUTH;
 const KML_DIRECTORY = 'kml-files';
-const SEND_TIMEOUT = 2000;
 
 async function parseAndSendKmlData(socket) {
 
   try {
-    const files = await fs.promises.readdir(KML_DIRECTORY);
+    if (isMainThread) {
+      const files = await fs.promises.readdir(KML_DIRECTORY);
 
-    for (const file of files) {
-      const filePath = path.join(KML_DIRECTORY, file);
-      const kmlString = await fs.promises.readFile(filePath, 'utf8');
+      const threadCount = files.length;
+      const threads = new Set();
 
-      let result;
-      try {
-        result = await new Promise((resolve, reject) => {
-          parseString(kmlString, (err, result) => {
-            if (err) reject(err);
-            else resolve(result);
+      for (const file of files) {
+        const filePath = path.join(KML_DIRECTORY, file);
+        if (!filePath.endsWith(".kml")) {
+          console.log(`Skipping ${filePath}`)
+          continue;
+        }
+        const kmlString = await fs.promises.readFile(filePath, 'utf8');
+  
+        let result;
+        try {
+          result = await new Promise((resolve, reject) => {
+            parseString(kmlString, (err, result) => {
+              if (err) {
+                reject(err);
+              }
+              else { 
+                resolve(result);
+              }
+            });
           });
-        });
-      } catch (err) {
-        console.error(err);
-        continue;
-      }
+        } catch (err) {
+          console.error(err);
+          continue;
+        }
+  
+        if (!result.kml.Document[0]?.Placemark) {
+          continue;
+        }
+  
+        // Persist the UID to provide the appearance of a moving object
+        const uid = uuid.v4();
+        console.log(uid);
+        const callsign = path.parse(file).name;
+        const timeOut = (Math.random() * 100) + 1500;
+        console.log(timeOut);
 
-      if (!result.kml.Document[0]?.Placemark) {
-        continue;
-      }
-
-      // Persist the UID to provide the appearance of a moving object
-      let uid = randomUUID.toString();
-      let callsign = path.parse(file).name;
-      console.log(callsign);
-      for (const placemark of result.kml.Document[0].Placemark) {
-        const cotData = {
-          uid,
-          name: callsign,
-          lon: placemark?.Point?.[0]?.coordinates?.[0]?.trim()?.split(",")?.[0],
-          lat: placemark?.Point?.[0]?.coordinates?.[0]?.trim()?.split(",")?.[1],
-        };
-
-        await setTimeout(SEND_TIMEOUT);
-
-        createCotWithBuilder(cotData, (cotMsg) => {
+        const worker = new Worker("./worker.js", { workerData: { uid, callsign, result, timeOut }})
+        worker.on('error', (err) => { throw err; });
+        worker.on('exit', () => {
+          threads.delete(worker);
+          console.log(`Thread exiting, ${threads.size} running...`);
+        })
+        worker.on('message', (msg) => {
           if (socket) {
-            socket.send(cotMsg);
-          }
+            socket.send(msg);
+          }          
         });
+        
+        threads.add(worker);
       }
-    }
+    } 
+    
   } catch (err) {
     console.error(err);
   }
 }
 
-function createCotWithBuilder(cotData, callback) {
-  var start = new Date();
-  var stale = new Date();
-  stale.setMinutes(stale.getMinutes() + 2);
 
-  callback(builder.create({
-    event: {
-      '@uid': cotData.uid,
-      '@version': '2.0',
-      '@type': 'a-f-G-U-C-I',
-      '@how': 'h-e',
-      '@start': start.toISOString(),
-      '@time': start.toISOString(),
-      '@stale': stale.toISOString(),
-      point: {
-        '@lat': cotData.lat,
-        '@lon': cotData.lon,
-        '@hae': '9999999.0',
-        '@le': '9999999.0',
-        '@ce': '9999999.0'
-      },
-      detail: {
-        contact: {
-          '@callsign': cotData.name,
-          '@endpoint': "1",
-        },
-        __group: {
-          '@name': 'Red',
-          '@role': 'Victim'
-        },
-        track: {
-          '@course': '0',
-          '@speed': '0'
-        }
-      },
-
-    }
-  }, { encoding: 'UTF-8', standalone: 'yes' }).end());
-}
 
 
 async function connectToSitX(callback) {
@@ -141,17 +116,19 @@ async function go() {
   var token = "";
   var socket = null;
 
-  await connectToSitX(async (err, accessToken) => {
-    if (!err) {
-      token = accessToken;
-      let url = streamingURL;
-      let authHeader = `Bearer ${token}`;
-      socket = new WebSocket(url, [], { 'headers': { 'Authorization': authHeader } });
-      socket.on('open', () => {
-        parseAndSendKmlData(socket);
-      })
-    }
-  });
+  if (isMainThread) {
+    await connectToSitX(async (err, accessToken) => {
+      if (!err) {
+        token = accessToken;
+        let url = streamingURL;
+        let authHeader = `Bearer ${token}`;
+        socket = new WebSocket(url, [], { 'headers': { 'Authorization': authHeader } });
+        socket.on('open', () => {
+          parseAndSendKmlData(socket);
+        })
+      }
+    });
+  }
 }
 
 go();
