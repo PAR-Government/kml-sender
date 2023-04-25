@@ -56,10 +56,9 @@ async function parseAndSendKmlData(socket) {
   
         // Persist the UID to provide the appearance of a moving object
         const uid = uuid.v4();
-        console.log(uid);
         const callsign = path.parse(file).name;
         const timeOut = (Math.random() * 100) + 1500;
-        console.log(timeOut);
+        
 
         const worker = new Worker("./worker.js", { workerData: { uid, callsign, result, timeOut }})
         worker.on('error', (err) => { throw err; });
